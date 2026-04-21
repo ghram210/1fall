@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import Login from "./pages/Login.tsx";
+import AcceptInvite from "./pages/AcceptInvite.tsx";
 import Index from "./pages/Index.tsx";
 import Vulnerabilities from "./pages/Vulnerabilities.tsx";
 import ScanResults from "./pages/ScanResults.tsx";
@@ -26,6 +27,7 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/invite/:token" element={<AcceptInvite />} />
             <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
             <Route path="/vulnerabilities" element={<ProtectedRoute><Vulnerabilities /></ProtectedRoute>} />
             <Route path="/vuln-dashboard" element={<ProtectedRoute><VulnDashboard /></ProtectedRoute>} />

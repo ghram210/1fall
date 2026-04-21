@@ -1,25 +1,19 @@
 import { useState } from "react";
 import AppSidebar from "@/components/AppSidebar";
 import TopBar from "@/components/TopBar";
-import { Users, Scan, Bug, Activity, UserPlus, Send, FileText, Trash2 } from "lucide-react";
+import { Users, Scan, Bug, Activity, UserPlus, Send, FileText, Trash2, Copy, Check } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 const AdminPanel = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState("User");
-  const { userRole } = useAuth();
+  const [generatedLink, setGeneratedLink] = useState("");
+  const [copied, setCopied] = useState(false);
+  const { userRole, session } = useAuth();
   const queryClient = useQueryClient();
 
   const { data: users } = useQuery({
@@ -78,24 +72,42 @@ const AdminPanel = () => {
     { label: "ACTIVE SCANS", value: activeScans, icon: Activity, color: "text-chart-4" },
   ];
 
-  const handleSendInvite = async () => {
-    if (!inviteEmail) {
-      toast.error("Please enter an email address");
+  const handleGenerateInvite = async () => {
+    if (!session?.access_token) {
+      toast.error("Not authenticated");
       return;
     }
     try {
-      const { data, error } = await supabase.functions.invoke("invite-user", {
-        body: { email: inviteEmail },
+      const res = await fetch("/api/invitations", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ email: inviteEmail || null }),
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      toast.success(`Invitation sent to ${inviteEmail}`);
-      setInviteEmail("");
-      setShowInvite(false);
-      queryClient.invalidateQueries({ queryKey: ["admin_users"] });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to generate invitation");
+      const link = `${window.location.origin}/invite/${data.token}`;
+      setGeneratedLink(link);
+      toast.success("Invitation link generated");
     } catch (err: any) {
-      toast.error(err.message || "Failed to send invitation");
+      toast.error(err.message || "Failed to generate invitation");
     }
+  };
+
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(generatedLink);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    toast.success("Link copied to clipboard");
+  };
+
+  const handleCloseInvite = () => {
+    setShowInvite(false);
+    setInviteEmail("");
+    setGeneratedLink("");
+    setCopied(false);
   };
 
   const formatDate = (dateStr: string) => {
@@ -130,36 +142,55 @@ const AdminPanel = () => {
 
           {showInvite && (
             <div className="bg-card border border-border rounded-xl p-5 mb-6">
-              <div className="flex items-end gap-4">
-                <div className="flex-1">
-                  <label className="text-sm text-muted-foreground mb-1 block">Email</label>
-                  <input
-                    type="email"
-                    placeholder="user@example.com"
-                    value={inviteEmail}
-                    onChange={(e) => setInviteEmail(e.target.value)}
-                    className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-foreground focus:outline-none focus:border-primary"
-                  />
+              {!generatedLink ? (
+                <div className="flex items-end gap-4">
+                  <div className="flex-1">
+                    <label className="text-sm text-muted-foreground mb-1 block">Email (optional)</label>
+                    <input
+                      type="email"
+                      placeholder="user@example.com"
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                      className="w-full bg-background border border-border rounded-lg px-4 py-2.5 text-foreground focus:outline-none focus:border-primary"
+                    />
+                  </div>
+                  <button
+                    onClick={handleGenerateInvite}
+                    className="flex items-center gap-2 bg-primary text-primary-foreground px-5 py-2.5 rounded-lg font-medium hover:bg-primary/90 transition-colors whitespace-nowrap"
+                  >
+                    <Send className="w-4 h-4" />
+                    Generate Link
+                  </button>
+                  <button
+                    onClick={handleCloseInvite}
+                    className="px-4 py-2.5 rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Cancel
+                  </button>
                 </div>
-                <div className="w-40">
-                  <label className="text-sm text-muted-foreground mb-1 block">Role</label>
-                  <Select value={inviteRole} onValueChange={setInviteRole}>
-                    <SelectTrigger className="bg-background border-border">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="User">User</SelectItem>
-                    </SelectContent>
-                  </Select>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-sm text-muted-foreground">Copy this link and send it to the user. It expires in 7 days.</p>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 bg-background border border-border rounded-lg px-4 py-2.5 text-sm text-foreground font-mono overflow-hidden text-ellipsis whitespace-nowrap">
+                      {generatedLink}
+                    </div>
+                    <button
+                      onClick={handleCopyLink}
+                      className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2.5 rounded-lg font-medium hover:bg-primary/90 transition-colors whitespace-nowrap"
+                    >
+                      {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      {copied ? "Copied!" : "Copy"}
+                    </button>
+                    <button
+                      onClick={handleCloseInvite}
+                      className="px-4 py-2.5 rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Done
+                    </button>
+                  </div>
                 </div>
-                <button
-                  onClick={handleSendInvite}
-                  className="flex items-center gap-2 bg-primary text-primary-foreground px-5 py-2.5 rounded-lg font-medium hover:bg-primary/90 transition-colors whitespace-nowrap"
-                >
-                  <Send className="w-4 h-4" />
-                  Send Invite
-                </button>
-              </div>
+              )}
             </div>
           )}
 
