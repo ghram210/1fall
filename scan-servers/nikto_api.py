@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from security import sanitize_target, sanitize_options, extract_hostname
+from runner import run_streaming
 
 app = FastAPI(title="Nikto API", version="1.0.0")
 
@@ -16,11 +17,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Stealth mode timeout: 45 min | Normal mode timeout: 30 min
 TIMEOUT_STEALTH = 2700
 TIMEOUT_NORMAL  = 1800
 
-# Realistic browser User-Agents for stealth
 BROWSER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15",
@@ -32,7 +31,7 @@ BROWSER_AGENTS = [
 class ScanRequest(BaseModel):
     target: str
     options: str = ""
-    stealth: bool = True   # default: stealth ON
+    stealth: bool = True
 
 
 def detect_port(target: str) -> str:
@@ -44,14 +43,20 @@ def detect_port(target: str) -> str:
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "tool": "nikto"}
+    nikto_path = shutil.which("nikto")
+    return {
+        "status": "ok",
+        "tool": "nikto",
+        "installed": nikto_path is not None,
+        "path": nikto_path,
+    }
 
 
 @app.post("/scan")
 def run_nikto(req: ScanRequest):
     try:
         target  = sanitize_target(req.target)
-        options = sanitize_options(req.options)
+        options = sanitize_options(req.options) if req.options.strip() else ""
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -59,7 +64,7 @@ def run_nikto(req: ScanRequest):
     if not nikto_path:
         raise HTTPException(
             status_code=500,
-            detail="Tool nikto is not installed on the system",
+            detail="nikto is not installed. Install it with: sudo apt install nikto",
         )
 
     host   = extract_hostname(target)
@@ -67,9 +72,6 @@ def run_nikto(req: ScanRequest):
     port   = detect_port(target)
     agent  = random.choice(BROWSER_AGENTS)
 
-    # -------------------------------------------------------
-    # Base command — common to both modes
-    # -------------------------------------------------------
     cmd = [
         nikto_path,
         "-h", f"{scheme}://{host}",
@@ -84,75 +86,39 @@ def run_nikto(req: ScanRequest):
     if scheme == "https":
         cmd.append("-ssl")
 
-    # -------------------------------------------------------
-    # STEALTH MODE — solves: noise, alerts, IP ban
-    # -------------------------------------------------------
     if req.stealth:
         timeout = TIMEOUT_STEALTH
         cmd += [
-            # Test categories — excludes DoS (6) to avoid server damage
-            "-Tuning", "0123457890abcx",
-
-            # Cookie testing
-            "-C", "all",
-
-            # Max scan time
+            "-Tuning", "123457890abcx",
+            "-Cgidirs", "all",
             "-maxtime", "2400s",
-
-            # --- SOLUTION 1: Reduce noise ---
-            # Pause N seconds between every request (reduces req/sec drastically)
-            "-pause", "2",
-
-            # --- SOLUTION 2: Evade security alerts / IDS / WAF ---
-            # Nikto evasion techniques:
-            # 1 = Random URL encoding of non-alphanumeric chars
-            # 2 = Directory self-reference (/./admin instead of /admin)
-            # 3 = Premature URL ending (adds null byte tricks)
-            # 4 = Prepend long random string to confuse pattern matching
-            # 5 = Fake URL parameter (/admin?fake=randomvalue)
-            # 6 = TAB as request spacer instead of space
-            # 7 = Random case in URL (/AdMiN instead of /admin)
-            # 8 = Windows-style path separator (\admin instead of /admin)
-            "-evasion", "1234567",
+            "-Pause", "2",
+            "-evasion", "1",
         ]
-
-    # -------------------------------------------------------
-    # NORMAL MODE — full speed, all categories
-    # -------------------------------------------------------
     else:
         timeout = TIMEOUT_NORMAL
         cmd += [
-            "-Tuning", "0123456789abcx",
-            "-C", "all",
+            "-Tuning", "123456789abcx",
+            "-Cgidirs", "all",
             "-maxtime", "1500s",
         ]
 
-    # Extra user-supplied options
     if options:
         cmd.extend(o for o in options.split() if len(o) < 40)
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        output = result.stdout or ""
-        if result.stderr:
-            output += "\n[STDERR]\n" + result.stderr
+        output, rc = run_streaming(cmd, timeout=timeout, label="NIKTO")
         if not output.strip():
             output = "No output returned from Nikto."
-    except subprocess.TimeoutExpired:
-        output = f"Nikto scan timed out after {timeout // 60} minutes."
     except Exception as e:
-        output = f"Error running nikto: {str(e)}"
+        output = f"Error running nikto: {type(e).__name__}: {str(e)}"
 
     mode_label = "STEALTH" if req.stealth else "NORMAL"
     return {
         "tool": "nikto",
         "target": target,
         "mode": mode_label,
+        "command": " ".join(cmd[:6]) + " ...",
         "output": output,
         "status": "completed",
     }

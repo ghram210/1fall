@@ -1,6 +1,7 @@
 import os
 import uuid
 import asyncio
+import re
 from datetime import datetime, timezone
 
 import httpx
@@ -31,6 +32,13 @@ TOOL_SERVERS = {
     "FFUF": FFUF_URL,
 }
 
+TOOL_DEFAULT_OPTIONS = {
+    "NMAP":   "-sV -T4 --top-ports 1000",
+    "NIKTO":  "",
+    "SQLMAP": "--batch --level=1 --risk=1",
+    "FFUF":   "",
+}
+
 SUPABASE_HEADERS = {
     "apikey": SUPABASE_SERVICE_KEY,
     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
@@ -45,21 +53,67 @@ class ScanRequest(BaseModel):
     tool: str
     description: str = ""
     options: str = ""
-    stealth: bool = True   # default: stealth ON
+    stealth: bool = True
+
+
+def count_findings(tool: str, output: str) -> int:
+    if not output:
+        return 0
+    tool = tool.upper()
+    if tool == "NMAP":
+        return len(re.findall(r'\d+/tcp\s+open', output, re.IGNORECASE))
+    elif tool == "NIKTO":
+        m = re.search(r'(\d+)\s+item\(s\)\s+reported', output, re.IGNORECASE)
+        if m:
+            return int(m.group(1))
+        meta_prefixes = (
+            "+ Target ", "+ Start Time", "+ End Time", "+ Server:",
+            "+ Host:", "+ Site Link", "+ Root page",
+            "+ /robots.txt", "+ No CGI", "+ Scan terminated",
+            "+ 1 host(s) tested",
+        )
+        count = 0
+        for line in output.splitlines():
+            if line.startswith("+ ") and not line.startswith(meta_prefixes):
+                count += 1
+        return count
+    elif tool == "SQLMAP":
+        patterns = [
+            r"parameter\s+'[^']+'\s+is\s+vulnerable",
+            r"appears to be '[^']+' injectable",
+            r"is vulnerable\.",
+            r"^Parameter:\s",
+            r"sqlmap identified the following injection point",
+        ]
+        total = 0
+        for p in patterns:
+            total += len(re.findall(p, output, re.IGNORECASE | re.MULTILINE))
+        return total
+    elif tool == "FFUF":
+        m = re.search(r'Total findings:\s*(\d+)', output)
+        if m:
+            return int(m.group(1))
+        return len(re.findall(r'Size:\d+', output))
+    return output.lower().count("finding") + output.lower().count("vulnerable")
 
 
 async def update_scan_in_supabase(scan_id: str, data: dict):
-    async with httpx.AsyncClient() as client:
-        await client.patch(
-            f"{SUPABASE_URL}/rest/v1/scan_results",
-            params={"id": f"eq.{scan_id}"},
-            headers=SUPABASE_HEADERS,
-            json=data,
-            timeout=15,
-        )
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.patch(
+                f"{SUPABASE_URL}/rest/v1/scan_results",
+                params={"id": f"eq.{scan_id}"},
+                headers=SUPABASE_HEADERS,
+                json=data,
+                timeout=15,
+            )
+    except Exception as e:
+        print(f"[gateway] Failed to update scan {scan_id}: {e}")
 
 
-async def run_scan_background(scan_id: str, target: str, tool: str, options: str, stealth: bool = True):
+async def run_scan_background(
+    scan_id: str, target: str, tool: str, options: str, stealth: bool = True
+):
     tool_url = TOOL_SERVERS.get(tool)
     if not tool_url:
         await update_scan_in_supabase(scan_id, {
@@ -69,41 +123,66 @@ async def run_scan_background(scan_id: str, target: str, tool: str, options: str
         })
         return
 
-    # Stealth scans can take up to 60 min; normal up to 45 min
+    effective_options = options.strip() if options.strip() else TOOL_DEFAULT_OPTIONS.get(tool, "")
+
     http_timeout = 3700 if stealth else 2700
 
+    raw_output = ""
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{tool_url}/scan",
-                json={"target": target, "options": options, "stealth": stealth},
+                json={"target": target, "options": effective_options, "stealth": stealth},
                 timeout=http_timeout,
             )
-        
+
         if resp.status_code == 200:
             result = resp.json()
-            raw_output = result.get("output", "No output")
+            raw_output = result.get("output", "No output returned")
         else:
-            raw_output = f"Tool server error: {resp.status_code} {resp.text}"
+            raw_output = (
+                f"Tool server returned error {resp.status_code}.\n"
+                f"Response: {resp.text[:500]}"
+            )
 
     except httpx.ConnectError:
-        raw_output = f"Cannot connect to {tool} server at {tool_url}. Is it running?"
+        raw_output = (
+            f"[ERROR] Cannot connect to {tool} server at {tool_url}.\n"
+            f"Make sure start.sh is running and the tool server started successfully.\n"
+            f"Check logs/{tool.lower()}.log for details."
+        )
     except httpx.TimeoutException:
-        raw_output = f"{tool} scan timed out"
+        raw_output = f"[TIMEOUT] {tool} scan timed out after {http_timeout // 60} minutes."
     except Exception as e:
-        raw_output = f"Unexpected error: {str(e)}"
+        raw_output = f"[UNEXPECTED ERROR] {type(e).__name__}: {str(e)}"
+
+    findings = count_findings(tool, raw_output)
 
     await update_scan_in_supabase(scan_id, {
         "status": "completed",
         "raw_output": raw_output,
         "completed_at": datetime.now(timezone.utc).isoformat(),
-        "total_findings": raw_output.lower().count("finding") + raw_output.lower().count("vulnerable"),
+        "total_findings": findings,
     })
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "gateway"}
+    tool_status = {}
+    return {"status": "ok", "service": "gateway", "tools": list(TOOL_SERVERS.keys())}
+
+
+@app.get("/tool-health")
+async def tool_health():
+    results = {}
+    for name, url in TOOL_SERVERS.items():
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get(f"{url}/health", timeout=3)
+            results[name] = "ok" if r.status_code == 200 else f"error:{r.status_code}"
+        except Exception as e:
+            results[name] = f"unreachable: {str(e)}"
+    return results
 
 
 @app.post("/scan")
@@ -115,7 +194,10 @@ async def start_scan(
     user = await get_admin_user(authorization)
 
     if req.tool not in TOOL_SERVERS and req.tool != "FULL":
-        raise HTTPException(status_code=400, detail=f"Unknown tool: {req.tool}. Use: {list(TOOL_SERVERS.keys())} or FULL")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown tool: {req.tool}. Use: {list(TOOL_SERVERS.keys())} or FULL",
+        )
 
     try:
         target = sanitize_target(req.target)
@@ -152,12 +234,20 @@ async def start_scan(
         )
 
     if resp.status_code not in (200, 201):
-        raise HTTPException(status_code=500, detail=f"Failed to create scan record: {resp.text}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create scan record: {resp.text}",
+        )
 
     if req.tool == "FULL":
         for tool_name in TOOL_SERVERS:
             sub_id = str(uuid.uuid4())
-            sub_data = {**scan_data, "id": sub_id, "name": f"{req.name} [{tool_name}]", "tool": tool_name}
+            sub_data = {
+                **scan_data,
+                "id": sub_id,
+                "name": f"{req.name} [{tool_name}]",
+                "tool": tool_name,
+            }
             async with httpx.AsyncClient() as client:
                 await client.post(
                     f"{SUPABASE_URL}/rest/v1/scan_results",
@@ -165,15 +255,19 @@ async def start_scan(
                     json=sub_data,
                     timeout=15,
                 )
-            background_tasks.add_task(run_scan_background, sub_id, target, tool_name, options, req.stealth)
+            background_tasks.add_task(
+                run_scan_background, sub_id, target, tool_name, options, req.stealth
+            )
 
         await update_scan_in_supabase(scan_id, {
             "status": "completed",
-            "raw_output": "Full scan dispatched to all tool servers. See individual scans below.",
+            "raw_output": "Full scan dispatched. See individual tool scans below.",
             "completed_at": now,
         })
     else:
-        background_tasks.add_task(run_scan_background, scan_id, target, req.tool, options, req.stealth)
+        background_tasks.add_task(
+            run_scan_background, scan_id, target, req.tool, options, req.stealth
+        )
 
     return {
         "scan_id": scan_id,
@@ -202,4 +296,4 @@ async def get_scan_status(scan_id: str, authorization: str = Header(None)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(app, host="0.0.0.0", port=8090)

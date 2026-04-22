@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from security import sanitize_target, sanitize_options
+from runner import run_streaming
 
 app = FastAPI(title="SQLmap API", version="1.0.0")
 
@@ -16,22 +17,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+DEFAULT_OPTIONS = "--batch --level=2 --risk=2"
+
 
 class ScanRequest(BaseModel):
     target: str
-    options: str = "--batch --level=1 --risk=1"
+    options: str = ""
+    stealth: bool = True
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "tool": "sqlmap"}
+    sqlmap_path = shutil.which("sqlmap")
+    return {
+        "status": "ok",
+        "tool": "sqlmap",
+        "installed": sqlmap_path is not None,
+        "path": sqlmap_path,
+    }
 
 
 @app.post("/scan")
 def run_sqlmap(req: ScanRequest):
     try:
         target = sanitize_target(req.target)
-        options = sanitize_options(req.options)
+        raw_opts = req.options.strip() if req.options.strip() else DEFAULT_OPTIONS
+        options = sanitize_options(raw_opts)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -39,37 +50,56 @@ def run_sqlmap(req: ScanRequest):
     if not sqlmap_path:
         raise HTTPException(
             status_code=500,
-            detail="Tool sqlmap is not installed on the system",
+            detail="sqlmap is not installed. Install it with: sudo apt install sqlmap",
         )
 
     url = target if "://" in target else f"http://{target}"
-    safe_opts = []
+
+    safe_opts = ["--batch"]
     for o in options.split():
-        if o.startswith("--") and "=" in o and len(o) < 50:
-            safe_opts.append(o)
-        elif o in ["--batch", "--forms", "--crawl", "--dbs", "--tables"]:
+        if o == "--batch":
+            continue
+        if o.startswith("--") and len(o) < 60:
             safe_opts.append(o)
 
-    cmd = [sqlmap_path, "-u", url, "--batch"] + safe_opts
+    opts_str = " ".join(safe_opts)
+    if "--level" not in opts_str:
+        safe_opts.append("--level=2")
+    if "--risk" not in opts_str:
+        safe_opts.append("--risk=2")
+
+    has_query = "?" in url and "=" in url.split("?", 1)[1]
+    if not has_query:
+        if "--forms" not in opts_str:
+            safe_opts.append("--forms")
+        if "--crawl" not in opts_str:
+            safe_opts.append("--crawl=2")
+        if "--smart" not in opts_str:
+            safe_opts.append("--smart")
+
+    if "--random-agent" not in opts_str:
+        safe_opts.append("--random-agent")
+    if "--threads" not in opts_str:
+        safe_opts.append("--threads=4")
+
+    if req.stealth and "--delay" not in opts_str:
+        safe_opts.append("--delay=1")
+
+    timeout = 1200
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        cmd.extend(["--output-dir", tmpdir])
+        cmd = [sqlmap_path, "-u", url, "--output-dir", tmpdir] + safe_opts
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            output = result.stdout or result.stderr or "No output"
-        except subprocess.TimeoutExpired:
-            output = "Scan timed out after 120 seconds"
+            output, rc = run_streaming(cmd, timeout=timeout, label="SQLMAP")
+            if not output.strip():
+                output = "sqlmap produced no output."
         except Exception as e:
-            output = f"Error running sqlmap: {str(e)}"
+            output = f"Error running sqlmap: {type(e).__name__}: {str(e)}"
 
     return {
         "tool": "sqlmap",
         "target": target,
+        "command": " ".join(cmd),
         "output": output,
         "status": "completed",
     }

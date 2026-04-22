@@ -7,7 +7,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 
-GATEWAY_URL = os.getenv("GATEWAY_URL", "http://localhost:8080")
+GATEWAY_URL = os.getenv("GATEWAY_URL", "http://localhost:8090")
 
 NMAP_URL = "http://localhost:8001"
 NIKTO_URL = "http://localhost:8002"

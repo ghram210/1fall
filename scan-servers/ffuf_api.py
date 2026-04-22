@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from security import sanitize_target, sanitize_options
+from runner import run_streaming
 
 app = FastAPI(title="FFUF API", version="1.0.0")
 
@@ -18,11 +19,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Timeouts
-TIMEOUT_STEALTH = 3600   # 60 min (slower rate = needs more time)
-TIMEOUT_NORMAL  = 2400   # 40 min
+TIMEOUT_STEALTH = 3600
+TIMEOUT_NORMAL  = 2400
 
-# Wordlist priority (largest → smallest)
 WORDLISTS = [
     "/usr/share/seclists/Discovery/Web-Content/directory-list-2.3-medium.txt",
     "/usr/share/seclists/Discovery/Web-Content/directory-list-2.3-small.txt",
@@ -36,7 +35,6 @@ EXTENSIONS = ".php,.html,.htm,.asp,.aspx,.js,.json,.xml,.txt,.bak,.old,.conf,.co
 
 FALLBACK_WORDLIST = os.path.join(os.path.dirname(__file__), "wordlist_full.txt")
 
-# Realistic browser User-Agents pool for rotation
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
@@ -45,61 +43,62 @@ USER_AGENTS = [
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
 ]
 
+FALLBACK_WORDS = [
+    "admin", "administrator", "login", "dashboard", "panel", "cpanel",
+    "api", "api/v1", "api/v2", "v1", "v2", "graphql", "rest",
+    "config", "configuration", "settings", "setup", "install",
+    "backup", "backups", "bak", "old", "temp", "tmp", "cache",
+    "test", "testing", "dev", "development", "staging", "prod",
+    "debug", "trace", "logs", "log",
+    "upload", "uploads", "file", "files", "media", "images",
+    "static", "assets", "css", "js", "fonts", "img",
+    "wp-admin", "wp-login.php", "wp-content", "wp-includes",
+    "phpmyadmin", "pma", "myadmin", "mysql", "adminer",
+    "xmlrpc.php", "readme.html", "license.txt",
+    ".git", ".env", ".htaccess", ".htpasswd", ".DS_Store",
+    "web.config", "crossdomain.xml", "sitemap.xml", "robots.txt",
+    "server-status", "server-info",
+    "console", "shell", "cmd", "exec",
+    "user", "users", "account", "accounts", "profile",
+    "register", "signup", "logout", "auth", "oauth",
+    "forgot", "reset", "password", "passwd",
+    "search", "query", "feed", "rss", "ajax",
+    "data", "database", "export", "import", "download",
+    "cgi-bin", "scripts", "bin", "include", "includes",
+    "lib", "library", "vendor", "node_modules",
+    "swagger", "swagger-ui", "openapi", "docs", "documentation",
+    "healthz", "health", "status", "ping", "metrics", "monitor",
+    "admin.php", "admin.html", "index.php", "index.html",
+    "login.php", "login.html", "signin.php",
+    "register.php", "signup.php",
+    "config.php", "config.yml", "config.json", "settings.php",
+    "database.php", "db.php", "connection.php",
+    "upload.php", "uploader.php", "filemanager",
+    "info.php", "phpinfo.php", "test.php",
+    "error_log", "error.log", "access.log", "debug.log",
+]
+
 
 class ScanRequest(BaseModel):
     target: str
     options: str = ""
-    stealth: bool = True   # default: stealth ON
+    stealth: bool = True
 
 
 def get_best_wordlist() -> str:
     for wl in WORDLISTS:
         if os.path.exists(wl) and os.path.getsize(wl) > 0:
             return wl
-    if not os.path.exists(FALLBACK_WORDLIST):
-        words = [
-            "admin", "administrator", "login", "dashboard", "panel", "cpanel",
-            "api", "api/v1", "api/v2", "v1", "v2", "graphql", "rest",
-            "config", "configuration", "settings", "setup", "install",
-            "backup", "backups", "bak", "old", "temp", "tmp", "cache",
-            "test", "testing", "dev", "development", "staging", "prod",
-            "debug", "trace", "logs", "log",
-            "upload", "uploads", "file", "files", "media", "images",
-            "static", "assets", "css", "js", "fonts", "img",
-            "wp-admin", "wp-login.php", "wp-content", "wp-includes",
-            "phpmyadmin", "pma", "myadmin", "mysql", "adminer",
-            "xmlrpc.php", "readme.html", "license.txt",
-            ".git", ".env", ".htaccess", ".htpasswd", ".DS_Store",
-            "web.config", "crossdomain.xml", "sitemap.xml", "robots.txt",
-            "server-status", "server-info",
-            "console", "shell", "cmd", "exec",
-            "user", "users", "account", "accounts", "profile",
-            "register", "signup", "logout", "auth", "oauth",
-            "forgot", "reset", "password", "passwd",
-            "search", "query", "feed", "rss", "ajax",
-            "data", "database", "export", "import", "download",
-            "cgi-bin", "scripts", "bin", "include", "includes",
-            "lib", "library", "vendor", "node_modules",
-            "swagger", "swagger-ui", "openapi", "docs", "documentation",
-            "healthz", "health", "status", "ping", "metrics", "monitor",
-            "admin.php", "admin.html", "index.php", "index.html",
-            "login.php", "login.html", "signin.php",
-            "register.php", "signup.php",
-            "config.php", "config.yml", "config.json", "settings.php",
-            "database.php", "db.php", "connection.php",
-            "upload.php", "uploader.php", "filemanager",
-            "info.php", "phpinfo.php", "test.php",
-            "error_log", "error.log", "access.log", "debug.log",
-        ]
+    if not os.path.exists(FALLBACK_WORDLIST) or os.path.getsize(FALLBACK_WORDLIST) == 0:
         with open(FALLBACK_WORDLIST, "w") as f:
-            f.write("\n".join(words))
+            f.write("\n".join(FALLBACK_WORDS))
     return FALLBACK_WORDLIST
 
 
 def format_results(data: dict, target: str, mode: str) -> str:
     results = data.get("results", [])
     if not results:
-        return f"FFUF [{mode} MODE]: No results found."
+        return f"FFUF [{mode} MODE]: No results found for {target}."
 
     by_status: dict[int, list] = {}
     for r in results:
@@ -107,18 +106,18 @@ def format_results(data: dict, target: str, mode: str) -> str:
         by_status.setdefault(code, []).append(r)
 
     status_labels = {
-        200: "✅ 200 OK",
-        201: "✅ 201 Created",
-        204: "✅ 204 No Content",
-        301: "↪  301 Moved Permanently",
-        302: "↪  302 Found (Redirect)",
-        307: "↪  307 Temporary Redirect",
-        400: "⚠️  400 Bad Request",
-        401: "🔒 401 Unauthorized",
-        403: "🔒 403 Forbidden",
-        405: "⚠️  405 Method Not Allowed",
-        500: "💥 500 Internal Server Error",
-        503: "💥 503 Service Unavailable",
+        200: "OK 200",
+        201: "Created 201",
+        204: "No Content 204",
+        301: "Redirect 301",
+        302: "Found 302",
+        307: "Temp Redirect 307",
+        400: "Bad Request 400",
+        401: "Unauthorized 401",
+        403: "Forbidden 403",
+        405: "Method Not Allowed 405",
+        500: "Server Error 500",
+        503: "Unavailable 503",
     }
 
     lines = [
@@ -128,8 +127,8 @@ def format_results(data: dict, target: str, mode: str) -> str:
     ]
 
     for code in sorted(by_status.keys()):
-        label = status_labels.get(code, f"   {code}")
-        lines.append(f"\n{label} ({len(by_status[code])} found):")
+        label = status_labels.get(code, str(code))
+        lines.append(f"\n[{label}] ({len(by_status[code])} found):")
         lines.append("-" * 40)
         for r in by_status[code]:
             path     = r.get("input", {}).get("FUZZ", "")
@@ -138,7 +137,7 @@ def format_results(data: dict, target: str, mode: str) -> str:
             redirect = r.get("redirectlocation", "")
             line = f"  /{path}  [Size:{size} Words:{words}]"
             if redirect:
-                line += f"  → {redirect}"
+                line += f"  -> {redirect}"
             lines.append(line)
 
     return "\n".join(lines)
@@ -146,14 +145,22 @@ def format_results(data: dict, target: str, mode: str) -> str:
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "tool": "ffuf"}
+    ffuf_path = shutil.which("ffuf")
+    wordlist = get_best_wordlist()
+    return {
+        "status": "ok",
+        "tool": "ffuf",
+        "installed": ffuf_path is not None,
+        "path": ffuf_path,
+        "wordlist": wordlist,
+    }
 
 
 @app.post("/scan")
 def run_ffuf(req: ScanRequest):
     try:
         target  = sanitize_target(req.target)
-        options = sanitize_options(req.options)
+        options = sanitize_options(req.options) if req.options.strip() else ""
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -161,7 +168,7 @@ def run_ffuf(req: ScanRequest):
     if not ffuf_path:
         raise HTTPException(
             status_code=500,
-            detail="Tool ffuf is not installed on the system",
+            detail="ffuf is not installed. Install it with: sudo apt install ffuf",
         )
 
     wordlist = get_best_wordlist()
@@ -174,96 +181,63 @@ def run_ffuf(req: ScanRequest):
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
         out_file = tmp.name
 
-    # -------------------------------------------------------
-    # Base command — common to both modes
-    # -------------------------------------------------------
     cmd = [
         ffuf_path,
         "-u", f"{url}FUZZ",
         "-w", f"{wordlist}:FUZZ",
         "-e", EXTENSIONS,
-        "-mc", "200,201,204,301,302,307,401,403,405,500,503",
+        "-mc", "200,201,204,301,302,307,308,401,403,405,500,503",
+        "-fc", "404",
         "-ic",
-        "-ac",
         "-r",
         "-o", out_file,
         "-of", "json",
-        "-s",
-
-        # --- SOLUTION 2: Mimic real browser (evades WAF/IDS fingerprinting) ---
         "-H", f"User-Agent: {agent}",
-        "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "-H", "Accept-Language: en-US,en;q=0.9",
-        "-H", "Accept-Encoding: gzip, deflate",
         "-H", "Connection: keep-alive",
-        "-H", "Upgrade-Insecure-Requests: 1",
     ]
 
-    # -------------------------------------------------------
-    # STEALTH MODE
-    # -------------------------------------------------------
     if req.stealth:
         timeout = TIMEOUT_STEALTH
         mode    = "STEALTH"
         cmd += [
-            # --- SOLUTION 1: Reduce noise (fewer threads = fewer parallel requests) ---
-            "-t", "5",
-
-            # --- SOLUTION 3: Prevent IP ban (rate limit + random delay) ---
-            # Max 15 requests per second
-            "-rate", "15",
-            # Random delay 1.0–3.0 seconds between each request
-            "-p", "1.0-3.0",
-
-            # No recursion in stealth (massively reduces total requests)
-            # Recursion depth 1 if a dir is found
-            "-recursion",
-            "-recursion-depth", "1",
-
-            # Per-request timeout
+            "-t", "10",
+            "-rate", "30",
+            "-p", "0.5-1.5",
             "-timeout", "15",
         ]
-
-    # -------------------------------------------------------
-    # NORMAL MODE — full speed
-    # -------------------------------------------------------
     else:
         timeout = TIMEOUT_NORMAL
         mode    = "NORMAL"
         cmd += [
-            "-t", "50",
-            "-rate", "100",
-            "-recursion",
-            "-recursion-depth", "3",
+            "-t", "40",
+            "-rate", "150",
             "-timeout", "10",
         ]
 
-    # Extra user-supplied options
     if options:
         cmd.extend(o for o in options.split() if len(o) < 40)
 
+    output = ""
+    raw_stream = ""
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        raw_stream, rc = run_streaming(cmd, timeout=timeout, label="FFUF")
 
         if os.path.exists(out_file) and os.path.getsize(out_file) > 0:
             with open(out_file) as f:
                 data = json.load(f)
             output = format_results(data, target, mode)
         else:
-            raw = result.stdout or result.stderr or "No results found."
-            output = f"FFUF [{mode}]:\n{raw}"
+            if raw_stream.strip():
+                output = f"FFUF [{mode}]:\n{raw_stream}"
+            else:
+                output = f"FFUF [{mode} MODE]: No accessible paths found on {target}."
 
-    except subprocess.TimeoutExpired:
-        output = f"FFUF [{mode}] timed out after {timeout // 60} minutes."
     except json.JSONDecodeError:
-        output = f"FFUF returned invalid JSON.\nRaw:\n{getattr(result, 'stdout', '')}"
+        output = f"FFUF returned invalid JSON.\nRaw:\n{raw_stream}"
     except Exception as e:
-        output = f"Error running ffuf: {str(e)}"
+        output = f"Error running ffuf: {type(e).__name__}: {str(e)}"
     finally:
         if os.path.exists(out_file):
             os.unlink(out_file)
@@ -272,6 +246,7 @@ def run_ffuf(req: ScanRequest):
         "tool": "ffuf",
         "target": target,
         "mode": mode,
+        "wordlist": wordlist,
         "output": output,
         "status": "completed",
     }
