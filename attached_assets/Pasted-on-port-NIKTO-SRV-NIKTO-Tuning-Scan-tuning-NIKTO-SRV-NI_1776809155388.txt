@@ -1,0 +1,53 @@
+on port
+[NIKTO-SRV] [NIKTO]        -Tuning+           Scan tuning:
+[NIKTO-SRV] [NIKTO]                                1     Interesting File / Seen in logs
+[NIKTO-SRV] [NIKTO]                                2     Misconfiguration / Default File
+[NIKTO-SRV] [NIKTO]                                3     Information Disclosure
+[NIKTO-SRV] [NIKTO]                                4     Injection (XSS/Script/HTML)
+[NIKTO-SRV] [NIKTO]                                5     Remote File Retrieval - Inside Web Root
+[NIKTO-SRV] [NIKTO]                                6     Denial of Service
+[NIKTO-SRV] [NIKTO]                                7     Remote File Retrieval - Server Wide
+[NIKTO-SRV] [NIKTO]                                8     Command Execution / Remote Shell
+[NIKTO-SRV] [NIKTO]                                9     SQL Injection
+[NIKTO-SRV] [NIKTO]                                0     File Upload
+[NIKTO-SRV] [NIKTO]                                a     Authentication Bypass
+[NIKTO-SRV] [NIKTO]                                b     Software Identification
+[NIKTO-SRV] [NIKTO]                                c     Remote Source Inclusion
+[NIKTO-SRV] [NIKTO]                                d     WebService
+[NIKTO-SRV] [NIKTO]                                e     Administrative Console
+[NIKTO-SRV] [NIKTO]                                x     Reverse Tuning Options (i.e., include all except specified)
+[NIKTO-SRV] [NIKTO]        -timeout+          Timeout for requests (default 10 seconds)
+[NIKTO-SRV] [NIKTO]        -Userdbs           Load only user databases, not the standard databases
+[NIKTO-SRV] [NIKTO]                                all   Disable standard dbs and load only user dbs
+[NIKTO-SRV] [NIKTO]                                tests Disable only db_tests and load udb_tests
+[NIKTO-SRV] [NIKTO]        -useragent         Force User-Agent instead of pulling from database
+[NIKTO-SRV] [NIKTO]        -url+              Target host/URL (alias of -host)
+[NIKTO-SRV] [NIKTO]        -useproxy          Use the proxy defined in nikto.conf, or argument http://server:port
+[NIKTO-SRV] [NIKTO]        -Version           Print plugin and database versions
+[NIKTO-SRV] [NIKTO]        -vhost+            Virtual host (for Host header)
+[NIKTO-SRV] [NIKTO]        -404code           Ignore these HTTP codes as negative responses (always). Format is "302,301".
+[NIKTO-SRV] [NIKTO]        -404string         Ignore this string in response body content as negative response (always). Can be a regular expression.
+[NIKTO-SRV] [NIKTO]             + requires a value
+[NIKTO-SRV] [NIKTO] 
+[NIKTO-SRV] 
+[NIKTO-SRV] [NIKTO] Finished in 0s with exit code 0
+[NIKTO-SRV] [NIKTO] Total output lines: 104
+[NIKTO-SRV] ======================================================================
+[NIKTO-SRV] 
+[NIKTO-SRV] INFO:     127.0.0.1:37756 - "POST /scan HTTP/1.1" 200 OK
+[NMAP-SRV] [NMAP] Nmap scan report for testasp.vulnweb.com (44.238.29.244)
+[NMAP-SRV] [NMAP] Host is up (0.38s latency).
+[NMAP-SRV] [NMAP] rDNS record for 44.238.29.244: ec2-44-238-29-244.us-west-2.compute.amazonaws.com
+[NMAP-SRV] [NMAP] Not shown: 999 filtered tcp ports (no-response)
+[NMAP-SRV] [NMAP] PORT   STATE SERVICE VERSION
+[NMAP-SRV] [NMAP] 80/tcp open  http    Microsoft IIS httpd 8.5
+[NMAP-SRV] [NMAP] Service Info: OS: Windows; CPE: cpe:/o:microsoft:windows
+[NMAP-SRV] [NMAP] 
+[NMAP-SRV] [NMAP] Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+[NMAP-SRV] [NMAP] Nmap done: 1 IP address (1 host up) scanned in 51.82 seconds
+[NMAP-SRV] 
+[NMAP-SRV] [NMAP] Finished in 51s with exit code 0
+[NMAP-SRV] [NMAP] Total output lines: 11
+[NMAP-SRV] ======================================================================
+[NMAP-SRV] 
+[NMAP-SRV] INFO:     127.0.0.1:60870 - "POST /scan HTTP/1.1" 200 OK

@@ -1,0 +1,48 @@
+4     Prepend long random string
+[NIKTO-SRV] [NIKTO]                                5     Fake parameter
+[NIKTO-SRV] [NIKTO]                                6     TAB as request spacer
+[NIKTO-SRV] [NIKTO]                                7     Change the case of the URL
+[NIKTO-SRV] [NIKTO]                                8     Use Windows directory separator (\)
+[NIKTO-SRV] [NIKTO]                                A     Use a carriage return (0x0d) as a request spacer
+[NIKTO-SRV] [NIKTO]                                B     Use binary value 0x0b as a request spacer
+[NIKTO-SRV] [NIKTO]         -followredirects   Follow 3xx redirects to new location
+[NIKTO-SRV] [NIKTO]         -Format+           Save file (-o) format:
+[NIKTO-SRV] [NIKTO]                                csv   Comma-separated-value
+[NIKTO-SRV] [NIKTO]                                json  JSON Format
+[NIKTO-SRV] [NIKTO]                                htm   HTML Format
+[NIKTO-SRV] [NIKTO]                                sql   Generic SQL (see docs for schema)
+[NIKTO-SRV] [NIKTO]                                txt   Plain text
+[NIKTO-SRV] [NIKTO]                                xml   XML Format
+[NIKTO-SRV] [NIKTO]                                (if not specified the format will be taken from the file extension passed to -output)
+[NIKTO-SRV] [NIKTO]        -Help              This help information
+[NIKTO-SRV] [NIKTO]        -host+             Target host/URL
+[NIKTO-SRV] [NIKTO]        -id+               Host authentication to use, format is id:pass or id:pass:realm
+[NIKTO-SRV] [NIKTO]        -ipv4                 IPv4 Only
+[NIKTO-SRV] [NIKTO]        -ipv6                 IPv6 Only
+[NIKTO-SRV] [NIKTO]        -key+              Client certificate key file
+[NIKTO-SRV] [NIKTO]        -list-plugins      List all available plugins, perform no testing
+[NIKTO-SRV] [NIKTO]        -maxtime+          Maximum testing time per host (e.g., 1h, 60m, 3600s)
+[NIKTO-SRV] [NIKTO]        -mutate+           Guess additional file names:
+[NIKTO-SRV] [NIKTO]                                1     Test all files with all root directories
+[NIKTO-SRV] [NIKTO]                                2     Guess for password file names
+[NIKTO-SRV] [NIKTO]                                3     Enumerate user names via Apache (/~user type requests)
+[NIKTO-SRV] [NIKTO]                                4     Enumerate user names via cgiwrap (/cgi-bin/cgiwrap/~user type requests)
+[NIKTO-SRV] [NIKTO]                                6     Attempt to guess directory names from the supplied dictionary file
+[NIKTO-SRV] [NIKTO]        -mutate-options    Provide information for mutates
+[NIKTO-SRV] [NIKTO]        -nocheck           Don't check for updates on startup
+[NIKTO-SRV] [NIKTO]        -nocookies         Do not use cookies from responses in requests
+[NIKTO-SRV] [NIKTO]        -nointeractive     Disables interactive features
+[NIKTO-SRV] [NIKTO]        -nolookup          Disables DNS lookups
+[NIKTO-SRV] [NIKTO]        -nossl             Disables the use of SSL
+[NIKTO-SRV] [NIKTO]        -noslash           Strip trailing slash from URL (e.g., '/admin/' to '/admin')
+[NIKTO-SRV] [NIKTO]        -no404             Disables nikto attempting to guess a 404 page
+[NIKTO-SRV] [NIKTO]        -Option            Over-ride an option in nikto.conf, can be issued multiple times
+[NIKTO-SRV] [NIKTO]        -output+           Write output to this file ('.' for auto-name)
+[NIKTO-SRV] [NIKTO]        -Pause+            Pause between tests (seconds)
+[NIKTO-SRV] [NIKTO]        -Platform+         Platform of target (nix, win, all)
+[NIKTO-SRV] [NIKTO]        -Plugins+          List of plugins to run (default: ALL)
+[NIKTO-SRV] [NIKTO]        -port+             Port to use (default 80)
+[NIKTO-SRV] [NIKTO]        -RSAcert+          Client certificate file
+[NIKTO-SRV] [NIKTO]        -root+             Prepend root value to all requests, format is /directory
+[NIKTO-SRV] [NIKTO]        -Save              Save positive responses to this directory ('.' for auto-name)
+[NIKTO-SRV] [NIKTO]        -ssl               Force ssl mode

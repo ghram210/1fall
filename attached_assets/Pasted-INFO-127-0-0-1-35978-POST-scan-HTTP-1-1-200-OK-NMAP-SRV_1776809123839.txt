@@ -1,0 +1,58 @@
+INFO:     127.0.0.1:35978 - "POST /scan HTTP/1.1" 200 OK
+[NMAP-SRV] 
+[NMAP-SRV] ======================================================================
+[NMAP-SRV] [NMAP] Starting: /usr/bin/nmap -sV -T4 --top-ports 1000 -Pn testphp.vulnweb.com
+[NMAP-SRV] ======================================================================
+[NMAP-SRV] [NMAP] Starting Nmap 7.98 ( https://nmap.org ) at 2026-04-22 00:54 +0000
+[NMAP-SRV] [NMAP] Nmap scan report for testphp.vulnweb.com (44.228.249.3)
+[NMAP-SRV] [NMAP] Host is up.
+[NMAP-SRV] [NMAP] rDNS record for 44.228.249.3: ec2-44-228-249-3.us-west-2.compute.amazonaws.com
+[NMAP-SRV] [NMAP] All 1000 scanned ports on testphp.vulnweb.com (44.228.249.3) are in ignored states.
+[NMAP-SRV] [NMAP] Not shown: 1000 filtered tcp ports (no-response)
+[NMAP-SRV] [NMAP] 
+[NMAP-SRV] [NMAP] Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+[NMAP-SRV] [NMAP] Nmap done: 1 IP address (1 host up) scanned in 103.00 seconds
+[NMAP-SRV] 
+[NMAP-SRV] [NMAP] Finished in 103s with exit code 0
+[NMAP-SRV] [NMAP] Total output lines: 9
+[NMAP-SRV] ======================================================================
+[NMAP-SRV] 
+[NMAP-SRV] INFO:     127.0.0.1:43330 - "POST /scan HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41658 - "POST /scan HTTP/1.1" 200 OK
+[NMAP-SRV] 
+[NMAP-SRV] ======================================================================
+[NMAP-SRV] [NMAP] Starting: /usr/bin/nmap -sV -T4 --top-ports 1000 -Pn testasp.vulnweb.com
+[NMAP-SRV] ======================================================================
+[NMAP-SRV] [NMAP] Starting Nmap 7.98 ( https://nmap.org ) at 2026-04-22 01:00 +0000
+INFO:     127.0.0.1:59244 - "POST /scan HTTP/1.1" 200 OK
+[NIKTO-SRV] 
+[NIKTO-SRV] ======================================================================
+[NIKTO-SRV] [NIKTO] Starting: /usr/bin/nikto -h http://testphp.vulnweb.com -p 80 -Format txt -Display ...
+[NIKTO-SRV] ======================================================================
+[NIKTO-SRV] [NIKTO] Unknown option: pause
+[NIKTO-SRV] [NIKTO] 
+[NIKTO-SRV] [NIKTO]    Options:
+[NIKTO-SRV] [NIKTO]        -Add-header         Add HTTP headers (can be used multiple times, one per header pair)
+[NIKTO-SRV] [NIKTO]        -ask+               Whether to ask about submitting updates
+[NIKTO-SRV] [NIKTO]                                yes   Ask about each (default)
+[NIKTO-SRV] [NIKTO]                                no    Don't ask, don't send
+[NIKTO-SRV] [NIKTO]                                auto  Don't ask, just send
+[NIKTO-SRV] [NIKTO]        -check6             Check if IPv6 is working (connects to ipv6.google.com or value set in nikto.conf)
+[NIKTO-SRV] [NIKTO]        -Cgidirs+           Scan these CGI dirs: "none", "all", or values like "/cgi/ /cgi-a/"
+[NIKTO-SRV] [NIKTO]        -config+            Use this config file
+[NIKTO-SRV] [NIKTO]        -Display+           Turn on/off display outputs:
+[NIKTO-SRV] [NIKTO]                                1     Show redirects
+[NIKTO-SRV] [NIKTO]                                2     Show cookies received
+[NIKTO-SRV] [NIKTO]                                3     Show all 200/OK responses
+[NIKTO-SRV] [NIKTO]                                4     Show URLs which require authentication
+[NIKTO-SRV] [NIKTO]                                D     Debug output
+[NIKTO-SRV] [NIKTO]                                E     Display all HTTP errors
+[NIKTO-SRV] [NIKTO]                                P     Print progress to STDOUT
+[NIKTO-SRV] [NIKTO]                                S     Scrub output of IPs and hostnames
+[NIKTO-SRV] [NIKTO]                                V     Verbose output
+[NIKTO-SRV] [NIKTO]        -dbcheck           Check database and other key files for syntax errors
+[NIKTO-SRV] [NIKTO]        -evasion+          Encoding technique:
+[NIKTO-SRV] [NIKTO]                                1     Random URI encoding (non-UTF8)
+[NIKTO-SRV] [NIKTO]                                2     Directory self-reference (/./)
+[NIKTO-SRV] [NIKTO]                                3     Premature URL ending
+[NIKTO-SRV] [NIKTO]
