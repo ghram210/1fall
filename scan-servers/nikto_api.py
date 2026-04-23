@@ -74,11 +74,10 @@ def run_nikto(req: ScanRequest):
 
     cmd = [
         nikto_path,
-        "-h", f"{scheme}://{host}",
+        "-h", host,
         "-p", port,
         "-Format", "txt",
         "-Display", "1234EP",
-        "-nolookup",
         "-followredirects",
         "-useragent", agent,
     ]
@@ -92,7 +91,6 @@ def run_nikto(req: ScanRequest):
             "-Tuning", "123457890abcx",
             "-Cgidirs", "all",
             "-maxtime", "2400s",
-            "-Pause", "2",
             "-evasion", "1",
         ]
     else:

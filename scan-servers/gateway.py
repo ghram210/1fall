@@ -33,9 +33,9 @@ TOOL_SERVERS = {
 }
 
 TOOL_DEFAULT_OPTIONS = {
-    "NMAP":   "-sV -T4 --top-ports 1000",
+    "NMAP":   "",
     "NIKTO":  "",
-    "SQLMAP": "--batch --level=1 --risk=1",
+    "SQLMAP": "",
     "FFUF":   "",
 }
 

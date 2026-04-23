@@ -16,7 +16,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DEFAULT_OPTIONS = "-sV -T4 --top-ports 1000"
+DEFAULT_OPTIONS_STEALTH = "-sV -T2 --top-ports 1000 --script=vuln,vulners,http-headers,http-methods,ssl-cert,banner"
+DEFAULT_OPTIONS_NORMAL  = "-sV -T4 --top-ports 1000 --script=vuln,vulners,http-headers,http-methods,ssl-cert,banner"
+
+TIMEOUT_STEALTH = 1800
+TIMEOUT_NORMAL  = 900
 
 
 class ScanRequest(BaseModel):
@@ -41,7 +45,8 @@ def health():
 def run_nmap(req: ScanRequest):
     try:
         target = sanitize_target(req.target)
-        raw_opts = req.options.strip() if req.options.strip() else DEFAULT_OPTIONS
+        default_opts = DEFAULT_OPTIONS_STEALTH if req.stealth else DEFAULT_OPTIONS_NORMAL
+        raw_opts = req.options.strip() if req.options.strip() else default_opts
         options = sanitize_options(raw_opts)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -56,7 +61,7 @@ def run_nmap(req: ScanRequest):
     hostname = extract_hostname(target)
     is_root = os.geteuid() == 0
 
-    safe_options = [o for o in options.split() if not o.startswith("-") or len(o) < 30]
+    safe_options = [o for o in options.split() if not o.startswith("-") or len(o) < 60]
 
     if not is_root:
         if "-sS" in safe_options:
@@ -70,7 +75,7 @@ def run_nmap(req: ScanRequest):
 
     cmd = [nmap_path] + safe_options + [hostname]
 
-    timeout = 300 if req.stealth else 180
+    timeout = TIMEOUT_STEALTH if req.stealth else TIMEOUT_NORMAL
 
     try:
         output, rc = run_streaming(cmd, timeout=timeout, label="NMAP")

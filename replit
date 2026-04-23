@@ -1,23 +1,53 @@
-modules = ["nodejs-24"]
+modules = ["nodejs-20", "python-3.12", "web"]
+[agent]
+expertMode = true
 
-[deployment]
-router = "application"
-deploymentTarget = "autoscale"
-
-[deployment.postBuild]
-args = ["pnpm", "store", "prune"]
-env = { "CI" = "true" }
+[nix]
+channel = "stable-25_05"
 
 [workflows]
 runButton = "Project"
 
-[agent]
-stack = "PNPM_WORKSPACE"
-expertMode = true
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
 
-[postMerge]
-path = "scripts/post-merge.sh"
-timeoutMs = 20000
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Backend API"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "PORT=5000 pnpm --filter @workspace/web-app run dev"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[workflows.workflow]]
+name = "Backend API"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run dev"
+waitForPort = 8080
+
+[[ports]]
+localPort = 5000
+externalPort = 80
 
 [[ports]]
 localPort = 8080
@@ -25,4 +55,21 @@ externalPort = 8080
 
 [[ports]]
 localPort = 8081
-externalPort = 80
+externalPort = 8081
+
+[[ports]]
+localPort = 22965
+externalPort = 3000
+
+[userenv]
+
+[userenv.shared]
+PORT = "8080"
+SUPABASE_URL = "https://jigpyecoschehwnexsfr.supabase.co"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImppZ3B5ZWNvc2NoZWh3bmV4c2ZyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxNDg3NjMsImV4cCI6MjA5MDcyNDc2M30.zMRizxx2TCEbADTZGEeMuLGmh_ws-AZcacZ2CxEcHgM"
+SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImppZ3B5ZWNvc2NoZWh3bmV4c2ZyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTE0ODc2MywiZXhwIjoyMDkwNzI0NzYzfQ.sB1nlNNSMhLbRSmkAi0VABYhIELE04TR69NcvS6e8BY"
+
+[deployment]
+deploymentTarget = "autoscale"
+run = ["bash", "-c", "pnpm --filter @workspace/api-server run start"]
+build = ["bash", "-c", "pnpm install && pnpm --filter @workspace/api-server run build && PORT=5000 pnpm --filter @workspace/web-app run build"]

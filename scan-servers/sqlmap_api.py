@@ -1,7 +1,5 @@
-import subprocess
 import shutil
-import os
-import tempfile
+import urllib.parse
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -17,13 +15,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DEFAULT_OPTIONS = "--batch --level=2 --risk=2"
+TIMEOUT_STEALTH = 1200
+TIMEOUT_NORMAL  = 600
+
+PROTECTED_FLAGS = {
+    "--level", "--risk", "--threads", "--timeout",
+    "--retries", "--time-sec", "--technique", "--batch",
+    "--delay",
+}
 
 
 class ScanRequest(BaseModel):
     target: str
     options: str = ""
     stealth: bool = True
+
+
+def _base_flag(opt: str) -> str:
+    return opt.split("=")[0]
 
 
 @app.get("/health")
@@ -41,8 +50,8 @@ def health():
 def run_sqlmap(req: ScanRequest):
     try:
         target = sanitize_target(req.target)
-        raw_opts = req.options.strip() if req.options.strip() else DEFAULT_OPTIONS
-        options = sanitize_options(raw_opts)
+        raw_opts = req.options.strip() if req.options.strip() else ""
+        options = sanitize_options(raw_opts) if raw_opts else ""
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -55,46 +64,62 @@ def run_sqlmap(req: ScanRequest):
 
     url = target if "://" in target else f"http://{target}"
 
-    safe_opts = ["--batch"]
-    for o in options.split():
-        if o == "--batch":
-            continue
-        if o.startswith("--") and len(o) < 60:
-            safe_opts.append(o)
+    parsed = urllib.parse.urlparse(url)
+    has_query = bool(parsed.query) and "=" in parsed.query
 
-    opts_str = " ".join(safe_opts)
-    if "--level" not in opts_str:
-        safe_opts.append("--level=2")
-    if "--risk" not in opts_str:
-        safe_opts.append("--risk=2")
+    if req.stealth:
+        cmd = [
+            sqlmap_path,
+            "-u", url,
+            "--batch",
+            "--random-agent",
+            "--level=3",
+            "--risk=2",
+            "--threads=2",
+            "--timeout=30",
+            "--retries=1",
+            "--time-sec=7",
+            "--technique=BEUSTQ",
+            "--delay=1",
+        ]
+    else:
+        cmd = [
+            sqlmap_path,
+            "-u", url,
+            "--batch",
+            "--random-agent",
+            "--level=3",
+            "--risk=2",
+            "--threads=5",
+            "--timeout=30",
+            "--retries=1",
+            "--time-sec=5",
+            "--technique=BEUSTQ",
+        ]
 
-    has_query = "?" in url and "=" in url.split("?", 1)[1]
-    if not has_query:
-        if "--forms" not in opts_str:
-            safe_opts.append("--forms")
-        if "--crawl" not in opts_str:
-            safe_opts.append("--crawl=2")
-        if "--smart" not in opts_str:
-            safe_opts.append("--smart")
+    if has_query:
+        cmd.append("--dbs")
+    else:
+        cmd.append("--forms")
 
-    if "--random-agent" not in opts_str:
-        safe_opts.append("--random-agent")
-    if "--threads" not in opts_str:
-        safe_opts.append("--threads=4")
+    if options:
+        protected_bases = {_base_flag(o) for o in cmd}
+        for o in options.split():
+            if not ((o.startswith("--") or o.startswith("-")) and len(o) < 60):
+                continue
+            base = _base_flag(o)
+            if base in PROTECTED_FLAGS or base in protected_bases:
+                continue
+            cmd.append(o)
 
-    if req.stealth and "--delay" not in opts_str:
-        safe_opts.append("--delay=1")
+    timeout = TIMEOUT_STEALTH if req.stealth else TIMEOUT_NORMAL
 
-    timeout = 1200
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        cmd = [sqlmap_path, "-u", url, "--output-dir", tmpdir] + safe_opts
-        try:
-            output, rc = run_streaming(cmd, timeout=timeout, label="SQLMAP")
-            if not output.strip():
-                output = "sqlmap produced no output."
-        except Exception as e:
-            output = f"Error running sqlmap: {type(e).__name__}: {str(e)}"
+    try:
+        output, rc = run_streaming(cmd, timeout=timeout, label="SQLMAP")
+        if not output.strip():
+            output = "sqlmap produced no output."
+    except Exception as e:
+        output = f"Error running sqlmap: {type(e).__name__}: {str(e)}"
 
     return {
         "tool": "sqlmap",
