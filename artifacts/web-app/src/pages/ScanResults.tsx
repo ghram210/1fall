@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import AppSidebar from "@/components/AppSidebar";
 import TopBar from "@/components/TopBar";
-import { Eye, Trash2, CheckCircle2, Loader2, Clock, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { Eye, Trash2, CheckCircle2, Loader2, Clock, AlertCircle, ChevronDown, ChevronUp, XCircle } from "lucide-react";
 
 interface ScanResult {
   id: string;
@@ -23,6 +23,24 @@ interface ScanResult {
   low_count: number;
   total_findings: number;
   created_at: string;
+}
+
+const STALE_AFTER_MINUTES = 5;
+
+function lastHeartbeatAgeMinutes(scan: ScanResult): number | null {
+  if (scan.status !== "running") return null;
+  const out = scan.raw_output || "";
+  const match = out.match(/Last heartbeat:\s*([0-9T:.\-+Z]+)/);
+  const tsStr = match ? match[1] : scan.started_at;
+  if (!tsStr) return null;
+  const ts = new Date(tsStr).getTime();
+  if (isNaN(ts)) return null;
+  return (Date.now() - ts) / 60000;
+}
+
+function isStale(scan: ScanResult): boolean {
+  const age = lastHeartbeatAgeMinutes(scan);
+  return age !== null && age > STALE_AFTER_MINUTES;
 }
 
 const statusConfig: Record<string, { label: string; icon: React.ReactNode; className: string }> = {
@@ -85,6 +103,28 @@ const ScanResults = () => {
     },
   });
 
+  const cancelMutation = useMutation({
+    mutationFn: async (scan: ScanResult) => {
+      const note =
+        (scan.raw_output ? scan.raw_output + "\n\n" : "") +
+        `[user] Manually marked as failed at ${new Date().toISOString()} ` +
+        `(server appears stopped or scan stuck).`;
+      const payload = {
+        status: "failed",
+        raw_output: note,
+        completed_at: new Date().toISOString(),
+      } as never;
+      const { error } = await supabase
+        .from("scan_results")
+        .update(payload)
+        .eq("id", scan.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["scan_results"] });
+    },
+  });
+
   const formatDate = (dateStr: string) => {
     const d = new Date(dateStr);
     return d.toLocaleDateString("en-US", {
@@ -133,6 +173,7 @@ const ScanResults = () => {
               ) : (
                 scans.map((scan) => {
                   const st = getStatus(scan.status);
+                  const stale = isStale(scan);
                   return (
                     <div
                       key={scan.id}
@@ -143,12 +184,18 @@ const ScanResults = () => {
                     >
                       <div className="flex items-start justify-between">
                         <div className="space-y-2">
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-3 flex-wrap">
                             <span className="font-semibold text-foreground">{scan.name}</span>
                             <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${st.className}`}>
                               {st.icon}
                               {st.label}
                             </span>
+                            {stale && (
+                              <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400">
+                                <AlertCircle className="w-3 h-3" />
+                                Stale (no heartbeat &gt; {STALE_AFTER_MINUTES}m)
+                              </span>
+                            )}
                           </div>
                           <div className="flex items-center gap-4 text-sm text-muted-foreground">
                             <span>Target: <span className="font-mono text-foreground">{scan.target}</span></span>
@@ -182,17 +229,31 @@ const ScanResults = () => {
                             </div>
                           )}
                         </div>
-                        {userRole === "admin" && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteMutation.mutate(scan.id);
-                            }}
-                            className="text-destructive hover:text-destructive/80 transition-colors p-1"
-                          >
-                            <Trash2 className="w-5 h-5" />
-                          </button>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {scan.status === "running" && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                cancelMutation.mutate(scan);
+                              }}
+                              title="Mark as failed (use when server is stopped or scan is stuck)"
+                              className="text-orange-400 hover:text-orange-300 transition-colors p-1"
+                            >
+                              <XCircle className="w-5 h-5" />
+                            </button>
+                          )}
+                          {userRole === "admin" && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteMutation.mutate(scan.id);
+                              }}
+                              className="text-destructive hover:text-destructive/80 transition-colors p-1"
+                            >
+                              <Trash2 className="w-5 h-5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -270,14 +331,36 @@ const ScanResults = () => {
                       </div>
                     )}
 
-                    {selectedScanUpdated.status === "running" && (
-                      <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-400">
-                        <div className="flex items-center gap-2">
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                          Scan in progress. Updating automatically...
+                    {selectedScanUpdated.status === "running" && (() => {
+                      const stale = isStale(selectedScanUpdated);
+                      const age = lastHeartbeatAgeMinutes(selectedScanUpdated);
+                      return stale ? (
+                        <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-3 text-xs text-orange-400 space-y-2">
+                          <div className="flex items-center gap-2 font-medium">
+                            <AlertCircle className="w-3 h-3" />
+                            Scan appears stuck (no heartbeat for {age?.toFixed(0)} min)
+                          </div>
+                          <p className="text-orange-400/80">
+                            The scan server is likely stopped. Click below to mark this scan as failed.
+                          </p>
+                          <button
+                            onClick={() => cancelMutation.mutate(selectedScanUpdated)}
+                            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 font-medium"
+                          >
+                            <XCircle className="w-3 h-3" />
+                            Mark as failed
+                          </button>
                         </div>
-                      </div>
-                    )}
+                      ) : (
+                        <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-400">
+                          <div className="flex items-center gap-2">
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            Scan in progress. Updating automatically...
+                            {age !== null && ` (last heartbeat ${age.toFixed(0)}m ago)`}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center py-12 text-muted-foreground space-y-3">

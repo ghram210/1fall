@@ -15,7 +15,7 @@ def run_streaming(cmd: list, timeout: int, label: str = "TOOL") -> tuple[str, in
     """
     start = time.time()
     print(f"\n{'=' * 70}", flush=True)
-    print(f"[{label}] Starting: {' '.join(cmd[:8])}{' ...' if len(cmd) > 8 else ''}", flush=True)
+    print(f"[{label}] Starting: {' '.join(cmd)}", flush=True)
     print(f"{'=' * 70}", flush=True)
 
     try:

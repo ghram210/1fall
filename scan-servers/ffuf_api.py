@@ -110,51 +110,6 @@ FALLBACK_WORDS = [
     "aws", "azure", "gcp", "cloud",
 ]
 
-SEVERITY_MAP = {
-    "critical": [
-        ".env", ".git", ".svn", "phpinfo.php", "info.php", "web.config",
-        "database.php", "db.php", "connection.php", ".htpasswd",
-        "config.php", "backup", "backups", ".bak", ".sql", ".db",
-        "shell", "cmd", "exec", "webshell", "adminer", "phpmyadmin",
-        "secret", "credentials", "token", "api-key", "secret-key",
-    ],
-    "high": [
-        "admin", "administrator", "cpanel", "panel", "wp-admin",
-        "wp-login.php", "upload.php", "uploader.php", "filemanager",
-        "login.php", "signin.php", "console", "debug",
-        "server-status", "server-info", "nginx_status", ".DS_Store", ".htaccess",
-        "swagger", "openapi", "graphql", "actuator",
-        "private", "internal", "restricted", "manage", "manager",
-    ],
-    "medium": [
-        "api", "api/v1", "api/v2", "api/v3", "graphql", "swagger-ui",
-        "dev", "development", "staging", "test", "testing", "demo",
-        "config", "settings", "setup", "configuration", "install",
-        "logs", "log", "error_log", "access.log", "debug.log",
-        "crossdomain.xml", "xmlrpc.php", "cors", "webhook",
-    ],
-    "low": [
-        "robots.txt", "sitemap.xml", "readme.html", "license.txt", "changelog.txt",
-        "docs", "documentation", "static", "assets", "public",
-    ],
-}
-
-
-def classify_severity(path: str, status: int) -> str:
-    path_lower = path.lower()
-    for severity, keywords in SEVERITY_MAP.items():
-        for kw in keywords:
-            if kw in path_lower:
-                return severity
-    if status == 500:
-        return "high"
-    if status in (401, 403):
-        return "medium"
-    if status in (301, 302, 307, 308):
-        return "low"
-    return "info"
-
-
 class ScanRequest(BaseModel):
     target: str
     options: str = ""
@@ -180,86 +135,177 @@ def build_base_url(target: str) -> str:
     return f"{base}{path}/"
 
 
+def _probe(test_url: str, agent: str, timeout: int = 8):
+    """Single HTTP probe → (status, size, words, lines) or None on failure."""
+    try:
+        req = urllib.request.Request(
+            test_url,
+            headers={
+                "User-Agent": agent,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
+        )
+        # Disable SSL verification for self-signed / lab targets.
+        import ssl
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            body = resp.read()
+            text = body.decode("utf-8", errors="ignore")
+            return (
+                resp.status,
+                len(body),
+                len(text.split()),
+                len(text.splitlines()),
+            )
+    except Exception:
+        return None
+
+
+def resolve_reachable_base(base_url: str, agent: str) -> str:
+    """
+    Make sure the base URL is actually reachable. If http:// fails, try https://.
+    Returns the working base URL (with trailing slash) or the original if neither works.
+    """
+    if _probe(base_url, agent, timeout=8) is not None:
+        return base_url
+
+    parsed = urllib.parse.urlparse(base_url)
+    if parsed.scheme == "http":
+        alt = urllib.parse.urlunparse(("https",) + parsed[1:])
+        if _probe(alt, agent, timeout=8) is not None:
+            print(f"[FFUF-RESOLVE] http:// unreachable → falling back to https://", flush=True)
+            return alt
+    elif parsed.scheme == "https":
+        alt = urllib.parse.urlunparse(("http",) + parsed[1:])
+        if _probe(alt, agent, timeout=8) is not None:
+            print(f"[FFUF-RESOLVE] https:// unreachable → falling back to http://", flush=True)
+            return alt
+
+    return base_url
+
+
 def calibrate_baseline(base_url: str, agent: str) -> list[str]:
     """
-    Fetch a random nonexistent path to detect the site's default response size.
-    Returns a list of -fs / -fw / -fl arguments to filter the baseline.
+    Probe several random non-existent paths to fingerprint the site's default
+    "not-found" response. Filter on size + words + lines so SPA shells (where
+    every unknown URL returns the same index.html) can still be filtered out
+    accurately, while real content (API endpoints, static files of different
+    sizes) still surfaces.
     """
     filter_args: list[str] = []
-    sizes: list[int] = []
+    samples: list[tuple[int, int, int, int]] = []  # (status, size, words, lines)
 
-    for _ in range(2):
+    for _ in range(3):
         rand_path = "".join(random.choices(string.ascii_lowercase + string.digits, k=20))
-        test_url = f"{base_url}{rand_path}"
-        try:
-            req = urllib.request.Request(
-                test_url,
-                headers={
-                    "User-Agent": agent,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                body = resp.read()
-                sizes.append(len(body))
-        except Exception:
-            pass
+        result = _probe(f"{base_url}{rand_path}", agent)
+        if result is not None:
+            samples.append(result)
 
-    if len(sizes) >= 1:
-        unique_sizes = list(set(sizes))
-        filter_args += ["-fs", ",".join(str(s) for s in unique_sizes)]
-        print(f"[FFUF-CALIBRATE] Baseline page size(s): {unique_sizes} — will filter these out", flush=True)
-    else:
-        print("[FFUF-CALIBRATE] Could not reach target for calibration, using -ac", flush=True)
-        filter_args.append("-ac")
+    if not samples:
+        # Couldn't reach the target at all — fall back to ffuf's built-in
+        # auto-calibration (it will probe on its own once running).
+        print("[FFUF-CALIBRATE] Could not reach target — using ffuf auto-calibration", flush=True)
+        filter_args += ["-ac", "-acc", "/", "-acc", "index", "-acc", "404page"]
+        return filter_args
+
+    statuses = sorted({s[0] for s in samples})
+    sizes    = sorted({s[1] for s in samples})
+    words    = sorted({s[2] for s in samples})
+    lines    = sorted({s[3] for s in samples})
+
+    print(f"[FFUF-CALIBRATE] Baseline statuses={statuses} sizes={sizes} words={words} lines={lines}", flush=True)
+
+    # Soft-404 detection: server returns 200 for unknown paths (typical SPAs,
+    # frameworks like React/Angular/Vue, or misconfigured catch-alls).
+    if 200 in statuses:
+        print("[FFUF-CALIBRATE] Soft-404 / SPA detected — filtering by size+words+lines", flush=True)
+
+    # Multi-dimensional filter: a real find has to differ in at least one
+    # of (size, words, lines) from EVERY baseline sample.
+    if sizes:
+        filter_args += ["-fs", ",".join(str(s) for s in sizes)]
+    if words and len(words) <= 5:
+        filter_args += ["-fw", ",".join(str(w) for w in words)]
+    if lines and len(lines) <= 5:
+        filter_args += ["-fl", ",".join(str(l) for l in lines)]
 
     return filter_args
 
 
+def deduplicate_noise(results: list, threshold: int = 6) -> tuple[list, list]:
+    """
+    Remove "noise clusters": groups of findings sharing the same response
+    fingerprint (status + size + words + lines). When more than `threshold`
+    paths return identical responses, it is virtually always a blanket
+    WAF/Cloudflare page or a generic server-error template, not real content.
+
+    Returns (real_findings, dropped_clusters_summary).
+    """
+    from collections import defaultdict
+    clusters: dict[tuple, list] = defaultdict(list)
+    for r in results:
+        key = (
+            r.get("status", 0),
+            r.get("length", 0),
+            r.get("words", 0),
+            r.get("lines", 0),
+        )
+        clusters[key].append(r)
+
+    real: list = []
+    dropped: list = []
+    for key, items in clusters.items():
+        if len(items) >= threshold:
+            dropped.append({
+                "status": key[0], "size": key[1], "words": key[2], "lines": key[3],
+                "count":  len(items),
+                "sample": items[0].get("input", {}).get("FUZZ", ""),
+            })
+        else:
+            real.extend(items)
+    return real, dropped
+
+
 def format_results(data: dict, target: str, mode: str) -> str:
-    results = data.get("results", [])
-    if not results:
+    raw_results = data.get("results", [])
+    if not raw_results:
         return f"FFUF [{mode} MODE]: No accessible paths found for {target}."
 
-    counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
-    by_severity: dict[str, list] = {s: [] for s in counts}
+    results, dropped = deduplicate_noise(raw_results)
 
+    findings: list[dict] = []
     for r in results:
-        path     = r.get("input", {}).get("FUZZ", "")
-        status   = r.get("status", 0)
-        size     = r.get("length", 0)
-        words    = r.get("words", 0)
-        redirect = r.get("redirectlocation", "")
-        severity = classify_severity(path, status)
-        counts[severity] += 1
-        by_severity[severity].append({
-            "path": path, "status": status,
-            "size": size, "words": words, "redirect": redirect,
+        findings.append({
+            "path":     r.get("input", {}).get("FUZZ", ""),
+            "status":   r.get("status", 0),
+            "size":     r.get("length", 0),
+            "words":    r.get("words", 0),
+            "redirect": r.get("redirectlocation", ""),
         })
 
     lines = [
         f"FFUF [{mode} MODE] — Target: {target}",
-        f"Total findings: {len(results)}",
-        f"Critical: {counts['critical']}  High: {counts['high']}  "
-        f"Medium: {counts['medium']}  Low: {counts['low']}  Info: {counts['info']}",
+        f"Real findings: {len(results)}  (filtered out {len(raw_results) - len(results)} noise hits)",
         "=" * 60,
     ]
 
-    severity_labels = {
-        "critical": "[CRITICAL]",
-        "high":     "[HIGH]    ",
-        "medium":   "[MEDIUM]  ",
-        "low":      "[LOW]     ",
-        "info":     "[INFO]    ",
-    }
+    if dropped:
+        lines.append("")
+        lines.append("Filtered noise clusters (likely WAF/Cloudflare/error templates — NOT vulnerabilities):")
+        for d in sorted(dropped, key=lambda x: -x["count"]):
+            lines.append(
+                f"  - {d['count']} paths returned identical "
+                f"HTTP {d['status']} (size={d['size']}, words={d['words']}, lines={d['lines']}) "
+                f"e.g. /{d['sample']}"
+            )
+        lines.append("=" * 60)
 
-    for severity in ("critical", "high", "medium", "low", "info"):
-        items = by_severity[severity]
-        if not items:
-            continue
-        lines.append(f"\n{severity_labels[severity]} ({len(items)} found):")
+    if findings:
+        lines.append(f"\nFindings ({len(findings)}):")
         lines.append("-" * 40)
-        for r in items:
+        for r in findings:
             line = f"  /{r['path']}  [HTTP {r['status']} | Size:{r['size']} Words:{r['words']}]"
             if r["redirect"]:
                 line += f"  -> {r['redirect']}"
@@ -301,6 +347,9 @@ def run_ffuf(req: ScanRequest):
     wordlist = get_best_wordlist()
     url      = build_base_url(target)
     agent    = random.choice(USER_AGENTS)
+
+    # Auto-fallback http <-> https if the original scheme isn't reachable.
+    url = resolve_reachable_base(url, agent)
 
     filter_args = calibrate_baseline(url, agent)
 
